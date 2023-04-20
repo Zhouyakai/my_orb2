@@ -31,7 +31,8 @@
 
 #include<opencv2/core/core.hpp>
 
-#include<System.h>
+#include "Geometry.h"
+#include <System.h>
 
 using namespace std;
 
@@ -135,7 +136,31 @@ int main(int argc, char **argv)
 
         cout << "********new********** " << ni+1 << endl;
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
+        //mask.setTo(1);
         mask = GetDynamicBox(detect_result,sockfd);
+        for (int i = 0; i < mask.rows; i++) {
+            for (int j = 0; j < mask.cols; j++) {
+                // 访问像素值
+                int pixel_value = mask.at<uchar>(i, j);
+                // 在此处进行处理操作
+                if (pixel_value == 0 )
+                {
+                    mask.at<uchar>(i, j) = 255;
+                }
+            }
+        }
+        cv::imshow("maks RCNN", mask);
+        for (int i = 0; i < mask.rows; i++) {
+            for (int j = 0; j < mask.cols; j++) {
+                // 访问像素值
+                int pixel_value = mask.at<uchar>(i, j);
+                // 在此处进行处理操作
+                if (pixel_value == 255 )
+                {
+                    mask.at<uchar>(i, j) = 0;
+                }
+            }
+        }
         // Pass the image to the SLAM system
         SLAM.TrackRGBD(imRGB,imD,mask,tframe);
 

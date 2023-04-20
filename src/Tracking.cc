@@ -230,7 +230,42 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, cv::Mat
 
     mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
+    LightTrack();
+
+    if (!mCurrentFrame.mTcw.empty())
+    {
+        mGeometry.GeometricModelCorrection(mCurrentFrame,imDepth,imMask);
+    }
+
+    for (int i = 0; i < imMask.rows; i++) {
+        for (int j = 0; j < imMask.cols; j++) {
+            // 访问像素值
+            int pixel_value = imMask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 0 )
+            {
+                imMask.at<uchar>(i, j) = 255;
+            }
+        }
+    }
+    cv::imshow("maks combine", imMask);
+    for (int i = 0; i < imMask.rows; i++) {
+        for (int j = 0; j < imMask.cols; j++) {
+            // 访问像素值
+            int pixel_value = imMask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 255 )
+            {
+                imMask.at<uchar>(i, j) = 0;
+            }
+        }
+    }
+
+    mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
+
     Track();
+
+    mGeometry.GeometricModelUpdateDB(mCurrentFrame);
 
     return mCurrentFrame.mTcw.clone();
 }
@@ -506,6 +541,106 @@ void Tracking::Track()
 
 }
 
+void Tracking::LightTrack()
+{
+    // Get Map Mutex -> Map cannot be changed
+    unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+    bool useMotionModel = true; //set true
+
+    if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
+    {
+        cout << "Light Tracking not working because Tracking is not initialized..." << endl;
+        return;
+    }
+    else
+    {
+        // System is initialized. Track Frame.
+        bool bOK;
+        {
+            // Localization Mode:
+            if(mState==LOST)
+            {
+                bOK = Relocalization(1);
+            }
+            else
+            {
+                if(!mbVO)
+                {
+                    // In last frame we tracked enough MapPoints in the map
+                    if(!mVelocity.empty() && useMotionModel)
+                    {
+                        bool _bOK = false;
+                        bOK = LightTrackWithMotionModel(_bOK);// TODO: check out!!!
+                    }
+                    else
+                    {
+                        bOK = TrackReferenceKeyFrame();
+                    }
+                }
+                else
+                {
+                    // In last frame we tracked mainly "visual odometry" points.
+
+                    // We compute two camera poses, one from motion model and one doing relocalization.
+                    // If relocalization is sucessfull we choose that solution, otherwise we retain
+                    // the "visual odometry" solution.
+
+                    bool bOKMM = false;
+                    bool bOKReloc = false;
+                    vector<MapPoint*> vpMPsMM;
+                    vector<bool> vbOutMM;
+                    cv::Mat TcwMM;
+                    bool lightTracking = false;
+                    bool bVO = false;
+                    if(!mVelocity.empty() && useMotionModel)
+                    {
+                        lightTracking = true;
+                        bOKMM = LightTrackWithMotionModel(bVO); // TODO: check out!!
+                        vpMPsMM = mCurrentFrame.mvpMapPoints;
+                        vbOutMM = mCurrentFrame.mvbOutlier;
+                        TcwMM = mCurrentFrame.mTcw.clone();
+                    }
+                    bOKReloc = Relocalization(1);
+
+                    if(bOKMM && !bOKReloc)
+                    {
+                        mCurrentFrame.SetPose(TcwMM);
+                        mCurrentFrame.mvpMapPoints = vpMPsMM;
+                        mCurrentFrame.mvbOutlier = vbOutMM;
+
+                        if((lightTracking && bVO) || (!lightTracking && mbVO))
+                        {
+                            for(int i =0; i<mCurrentFrame.N; i++)
+                            {
+                                if(mCurrentFrame.mvpMapPoints[i] && !mCurrentFrame.mvbOutlier[i])
+                                {
+                                    mCurrentFrame.mvpMapPoints[i]->IncreaseFound();
+                                }
+                            }
+                        }
+                    }
+
+                    bOK = bOKReloc || bOKMM;
+                }
+            }
+        }
+
+        mCurrentFrame.mpReferenceKF = mpReferenceKF;
+
+        if(!bOK)
+        {
+            if(mpMap->KeyFramesInMap()<=5)
+            {
+                cout << "Light Tracking not working..." << endl;
+                return;
+            }
+        }
+
+        if(!mCurrentFrame.mpReferenceKF)
+            mCurrentFrame.mpReferenceKF = mpReferenceKF;
+
+    }
+}
 
 void Tracking::StereoInitialization()
 {
@@ -865,6 +1000,68 @@ void Tracking::UpdateLastFrame()
     }
 }
 
+bool Tracking::LightTrackWithMotionModel(bool &bVO)
+{
+    ORBmatcher matcher(0.9,true);
+
+    // Update last frame pose according to its reference keyframe
+    // Create "visual odometry" points if in Localization Mode
+    Frame lastFrameBU = mLastFrame;
+    list<MapPoint*> lpTemporalPointsBU = mlpTemporalPoints;
+    UpdateLastFrame(); //TODO: check out!
+
+    mCurrentFrame.SetPose(mVelocity*mLastFrame.mTcw);
+
+    fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL)); //TODO:Checkout
+
+    // Project points seen in previous frame
+    int th;
+    if(mSensor!=System::STEREO)
+        th=15;
+    else
+        th=7;
+    int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);//TODO:Checkout
+
+    // If few matches, uses a wider window search
+    if(nmatches<20)
+    {
+        fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));//TODO:Checkout
+        nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR);//TODO:Checkout
+    }
+
+    if(nmatches<20)
+        return false;
+
+    // Optimize frame pose with all matches
+    Optimizer::PoseOptimization(&mCurrentFrame);
+
+    // Discard outliers
+    int nmatchesMap = 0;
+    for(int i =0; i<mCurrentFrame.N; i++)
+    {
+        if(mCurrentFrame.mvpMapPoints[i])
+        {
+            if(mCurrentFrame.mvbOutlier[i])
+            {
+                MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+
+                mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
+                mCurrentFrame.mvbOutlier[i]=false;
+                pMP->mbTrackInView = false;
+                pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+                nmatches--;
+            }
+            else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+                nmatchesMap++;
+        }
+    }
+    mLastFrame = lastFrameBU;
+    mlpTemporalPoints = lpTemporalPointsBU;
+
+    bVO = nmatchesMap<10;
+    return nmatches>20;
+
+}
 bool Tracking::TrackWithMotionModel()
 {
     ORBmatcher matcher(0.9,true);
@@ -1339,7 +1536,7 @@ void Tracking::UpdateLocalKeyFrames()
     }
 }
 
-bool Tracking::Relocalization()
+bool Tracking::Relocalization(int update)
 {
     // Compute Bag of Words Vector
     mCurrentFrame.ComputeBoW();
@@ -1496,7 +1693,8 @@ bool Tracking::Relocalization()
     }
     else
     {
-        mnLastRelocFrameId = mCurrentFrame.mnId;
+
+        if (update == 0) mnLastRelocFrameId = mCurrentFrame.mnId;
         return true;
     }
 

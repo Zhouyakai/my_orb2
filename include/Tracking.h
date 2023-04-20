@@ -37,6 +37,7 @@
 #include "Initializer.h"
 #include "MapDrawer.h"
 #include "System.h"
+#include "Geometry.h"
 
 #include <mutex>
 
@@ -120,6 +121,9 @@ protected:
     // Main tracking function. It is independent of the input sensor.
     void Track();
 
+    // Berta: LightTrack
+    void LightTrack();
+
     // Map initialization for stereo and RGB-D
     void StereoInitialization();
 
@@ -132,7 +136,10 @@ protected:
     void UpdateLastFrame();
     bool TrackWithMotionModel();
 
-    bool Relocalization();
+    // Berta: LightTrackWithMotionModel
+    bool LightTrackWithMotionModel(bool &bVO);
+
+    bool Relocalization(int update = 0);
 
     void UpdateLocalMap();
     void UpdateLocalPoints();
@@ -203,7 +210,7 @@ protected:
 
     //Last Frame, KeyFrame and Relocalisation Info
     KeyFrame* mpLastKeyFrame;
-    Frame mLastFrame;
+    Frame mLastFrame;//, mLightLastFrame;
     unsigned int mnLastKeyFrameId;
     unsigned int mnLastRelocFrameId;
 
@@ -214,6 +221,9 @@ protected:
     bool mbRGB;
 
     list<MapPoint*> mlpTemporalPoints;
+
+    //berta:
+    DynaSLAM::Geometry mGeometry;
 };
 
 } //namespace ORB_SLAM
