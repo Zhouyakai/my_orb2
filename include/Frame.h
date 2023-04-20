@@ -52,7 +52,7 @@ public:
     Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
 
     // Constructor for RGB-D cameras.
-    Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
+    Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imMask, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
 
     // Constructor for Monocular cameras.
     Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
@@ -131,6 +131,13 @@ public:
     // Number of KeyPoints.
     int N;
 
+    // Depth Image (Included by Berta).
+    cv::Mat mImDepth;
+    bool mIsKeyFrame;
+    cv::Mat mImMask;
+    cv::Mat mImGray;
+    cv::Mat mImRGB;
+
     // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
     // In the stereo case, mvKeysUn is redundant as images must be rectified.
     // In the RGB-D case, RGB images can be distorted.
@@ -200,6 +207,9 @@ private:
 
     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
     void AssignFeaturesToGrid();
+
+    //Included by Berta
+    void removeRow(cv::Mat &matIn, int row);
 
     // Rotation, translation and camera center
     cv::Mat mRcw;

@@ -44,10 +44,10 @@ Frame::Frame(const Frame &frame)
      mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      mDescriptors(frame.mDescriptors.clone()), mDescriptorsRight(frame.mDescriptorsRight.clone()),
      mvpMapPoints(frame.mvpMapPoints), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId),
-     mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels),
-     mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
-     mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),
-     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2)
+     mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels), mImRGB(frame.mImRGB),
+     mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor), mImGray(frame.mImGray),
+     mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors),mImMask(frame.mImMask),
+     mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2),mIsKeyFrame(frame.mIsKeyFrame),mImDepth(frame.mImDepth)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++)
@@ -116,9 +116,10 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     AssignFeaturesToGrid();
 }
 
-Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
-    :mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
-     mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
+Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const cv::Mat &imMask, const double &timeStamp,  ORBextractor* extractor, ORBVocabulary* voc,
+             cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
+    :mImMask(imMask), mpORBvocabulary(voc), mpORBextractorLeft(extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)), mImGray(imGray),
+     mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth), mIsKeyFrame(false), mImDepth(imDepth)
 {
     // Frame ID
     mnId=nNextId++;
@@ -134,6 +135,33 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
 
     // ORB extraction
     ExtractORB(0,imGray);
+
+    // Delete those ORB points that fall in Mask borders (Included by Berta)
+    // cv::Mat Mask_dil = imMask.clone();
+    // int dilation_size = 15;
+    // cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE,
+    //                                     cv::Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+    //                                     cv::Point( dilation_size, dilation_size ) );
+    // cv::erode(imMask, Mask_dil, kernel);
+
+    if(mvKeys.empty())
+        return;
+
+    std::vector<cv::KeyPoint> _mvKeys;
+    cv::Mat _mDescriptors;
+
+    for (size_t i(0); i < mvKeys.size(); ++i)
+    {
+        int val = (int)imMask.at<uchar>(mvKeys[i].pt.y,mvKeys[i].pt.x);
+        if (val == 1)
+        {
+            _mvKeys.push_back(mvKeys[i]);
+            _mDescriptors.push_back(mDescriptors.row(i));
+        }
+    }
+
+    mvKeys = _mvKeys;
+    mDescriptors = _mDescriptors;
 
     N = mvKeys.size();
 

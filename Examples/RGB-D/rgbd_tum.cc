@@ -17,6 +17,11 @@
 * You should have received a copy of the GNU General Public License
 * along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
 */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <stdio.h>
+#include <sys/un.h>
+#include <stdlib.h>
 
 #include<unistd.h>
 #include<iostream>
@@ -33,6 +38,11 @@ using namespace std;
 void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageFilenamesRGB,
                 vector<string> &vstrImageFilenamesD, vector<double> &vTimestamps);
 
+void LoadBoundingBoxFromPython(const string& resultFromPython, std::pair<vector<double>, int>& detect_result);
+void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result, int sockfd);
+cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd);
+
+
 int main(int argc, char **argv)
 {
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
@@ -41,6 +51,32 @@ int main(int argc, char **argv)
     {
         cerr << endl << "Usage: ./rgbd_tum path_to_vocabulary path_to_settings path_to_sequence path_to_association" << endl;
         return 1;
+    }
+
+    //for yolov5
+    int sockfd;
+	int len;
+	struct sockaddr_un address;
+	int result;
+ 
+	if((sockfd = socket(AF_UNIX, SOCK_STREAM, 0))==-1)//创建socket，指定通信协议为AF_UNIX,数据方式SOCK_STREAM
+	{
+		perror("socket");
+		exit(EXIT_FAILURE);
+	}
+	
+	//配置server_address
+	address.sun_family = AF_UNIX;
+	strcpy(address.sun_path, "/home/yakai/SLAM/orbslam_addsemantic-main/yolov5_RemoveDynamic/detect_speedup_send");
+	len = sizeof(address);
+ 
+	result = connect(sockfd, (struct sockaddr *)&address, len);
+ 
+	if(result == -1) 
+	{
+		printf("ensure the server is up\n");
+        	perror("connect");
+        	exit(EXIT_FAILURE);
     }
 
     // Retrieve paths to images
@@ -76,6 +112,7 @@ int main(int argc, char **argv)
 
     // Main loop
     cv::Mat imRGB, imD;
+    vector<std::pair<vector<double>, int>> detect_result;
     for(int ni=0; ni<nImages; ni++)
     {
         // Read image and depthmap from file
@@ -96,8 +133,11 @@ int main(int argc, char **argv)
         std::chrono::monotonic_clock::time_point t1 = std::chrono::monotonic_clock::now();
 #endif
 
+        cout << "********new********** " << ni+1 << endl;
+        cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
+        mask = GetDynamicBox(detect_result,sockfd);
         // Pass the image to the SLAM system
-        SLAM.TrackRGBD(imRGB,imD,tframe);
+        SLAM.TrackRGBD(imRGB,imD,mask,tframe);
 
 #ifdef COMPILEDWITHC11
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
@@ -171,3 +211,119 @@ void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageF
         }
     }
 }
+//在一句话中提取出四个边框值和物体类别,such as: left:1 top:134 right:269 bottom:478 class:person 0.79
+void LoadBoundingBoxFromPython(const string& resultFromPython, std::pair<vector<double>, int>& detect_result){
+    
+    if(resultFromPython.empty())
+    {
+        cerr << "no string from python! " << endl;
+    }
+    // cout << "here is LoadBoundingBoxFromPython " << endl;
+    vector<double> result_parameter;
+    int sum = 0, num_bit = 0;
+
+    for (char c : resultFromPython) {//读取数字.    例如读取"748",先读7,再7*10+8=78,再78*10+4,最后读到空格结束
+        if (c >= '0' && c <= '9') {
+            num_bit = c - '0';
+            sum = sum * 10 + num_bit;
+        } else if (c == ' ') {
+            result_parameter.push_back(sum);
+            sum = 0;
+            num_bit = 0;
+        }
+    }
+
+    detect_result.first = result_parameter;
+    // cout << "detect_result.first size is : " << detect_result.first.size() << endl;
+
+    string idx_begin = "class:";//读取物体类别
+    int idx = resultFromPython.find(idx_begin);
+    string idx_end = "0.";
+    int idx2 = resultFromPython.find(idx_end);
+    string class_label;
+    for (int j = idx + 6; j < idx2-1; ++j){
+        class_label += resultFromPython[j];
+    }
+
+    int class_id = -1;//存入识别物体的种类
+
+    if (class_label == "tv" ||   //低动态物体(在程序中可以假设为一直静态的物体):tv,refrigerator
+        class_label == "refrigerator" || 
+        class_label == "teddy bear"||
+        class_label == "laptop") {
+        class_id = 1;
+    }
+
+    if (class_label == "chair" || //中动态物体,在程序中不做先验动态静态判断
+        class_label == "car"){
+        class_id =2;
+    } 
+
+    if (class_label == "person") { //高动态物体:人,动物等
+        class_id = 3;
+    }
+
+    detect_result.second = class_id;
+    // cout << "LoadBoundingBoxFromPython class id is: " << class_id << endl;
+
+}
+
+//通过UNIX的协议,从python进程中获取一帧图像的物体框
+void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result , int sockfd){
+    detect_result.clear();
+
+	std::pair<vector<double>, int> detect_result_str;
+    int byte;
+	char send_buf[50],ch_recv[1024];
+
+    memset(send_buf, 0, sizeof(send_buf)); // clear char[]
+    memset(ch_recv, 0, sizeof(ch_recv));   // clear char[]
+
+    sprintf(send_buf, "ok"); // 用sprintf事先把消息写到send_buf
+    if ((byte = write(sockfd, send_buf, sizeof(send_buf))) == -1)
+    {
+        perror("write");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((byte = read(sockfd, &ch_recv, 1024)) == -1)
+    {
+        perror("read");
+        exit(EXIT_FAILURE);
+    }
+    //printf("In C++: %s",ch_recv);
+    // cout << ch_recv
+    //cout << "********new*********" << endl;
+    // string ch_recv_string = ch_recv;
+    // cout << ch_recv_string << endl;
+
+    char *ptr;//char[]可读可写,可以修改字符串的内容。char*可读不可写，写入就会导致段错误
+    ptr = strtok(ch_recv, "*");//字符串分割函数
+    while(ptr != NULL){
+        printf("ptr=%s\n",ptr);
+        string ptr_str = ptr;
+        LoadBoundingBoxFromPython(ptr_str,detect_result_str);
+        
+        detect_result.emplace_back(detect_result_str);
+        // cout << "hh: " << ptr_str << endl;  
+        ptr = strtok(NULL, "*");
+    }
+    // cout << "detect_result size is : " << detect_result.size() << endl;
+    // for (int k=0; k<detect_result.size(); ++k)
+        // cout << "detect_result is : \n " << detect_result[k].second << endl;
+}
+cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd){
+    MakeDetect_result(detect_result,sockfd);
+    cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
+    mask.setTo(1);
+    for(int k=0; k<detect_result.size(); ++k){
+        if (detect_result[k].second == 3 ){
+            cv::Point pt11,pt22;
+            pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
+            pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
+            cv::rectangle(mask,pt11,pt22,0,-1);
+        }
+    }
+    return mask;
+}
+
