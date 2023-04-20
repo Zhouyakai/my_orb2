@@ -55,30 +55,30 @@ int main(int argc, char **argv)
     }
 
     //for yolov5
-    int sockfd;
-	int len;
-	struct sockaddr_un address;
-	int result;
+    // int sockfd;
+	// int len;
+	// struct sockaddr_un address;
+	// int result;
  
-	if((sockfd = socket(AF_UNIX, SOCK_STREAM, 0))==-1)//创建socket，指定通信协议为AF_UNIX,数据方式SOCK_STREAM
-	{
-		perror("socket");
-		exit(EXIT_FAILURE);
-	}
+	// if((sockfd = socket(AF_UNIX, SOCK_STREAM, 0))==-1)//创建socket，指定通信协议为AF_UNIX,数据方式SOCK_STREAM
+	// {
+	// 	perror("socket");
+	// 	exit(EXIT_FAILURE);
+	// }
 	
-	//配置server_address
-	address.sun_family = AF_UNIX;
-	strcpy(address.sun_path, "/home/yakai/SLAM/orbslam_addsemantic-main/yolov5_RemoveDynamic/detect_speedup_send");
-	len = sizeof(address);
+	// //配置server_address
+	// address.sun_family = AF_UNIX;
+	// strcpy(address.sun_path, "/home/yakai/SLAM/orbslam_addsemantic-main/yolov5_RemoveDynamic/detect_speedup_send");
+	// len = sizeof(address);
  
-	result = connect(sockfd, (struct sockaddr *)&address, len);
+	// result = connect(sockfd, (struct sockaddr *)&address, len);
  
-	if(result == -1) 
-	{
-		printf("ensure the server is up\n");
-        	perror("connect");
-        	exit(EXIT_FAILURE);
-    }
+	// if(result == -1) 
+	// {
+	// 	printf("ensure the server is up\n");
+    //     	perror("connect");
+    //     	exit(EXIT_FAILURE);
+    // }
 
     // Retrieve paths to images
     vector<string> vstrImageFilenamesRGB;
@@ -136,31 +136,31 @@ int main(int argc, char **argv)
 
         cout << "********new********** " << ni+1 << endl;
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
-        //mask.setTo(1);
-        mask = GetDynamicBox(detect_result,sockfd);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 0 )
-                {
-                    mask.at<uchar>(i, j) = 255;
-                }
-            }
-        }
-        cv::imshow("maks RCNN", mask);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 255 )
-                {
-                    mask.at<uchar>(i, j) = 0;
-                }
-            }
-        }
+        mask.setTo(1);
+        // mask = GetDynamicBox(detect_result,sockfd);
+        // for (int i = 0; i < mask.rows; i++) {
+        //     for (int j = 0; j < mask.cols; j++) {
+        //         // 访问像素值
+        //         int pixel_value = mask.at<uchar>(i, j);
+        //         // 在此处进行处理操作
+        //         if (pixel_value == 0 )
+        //         {
+        //             mask.at<uchar>(i, j) = 255;
+        //         }
+        //     }
+        // }
+        // cv::imshow("maks RCNN", mask);
+        // for (int i = 0; i < mask.rows; i++) {
+        //     for (int j = 0; j < mask.cols; j++) {
+        //         // 访问像素值
+        //         int pixel_value = mask.at<uchar>(i, j);
+        //         // 在此处进行处理操作
+        //         if (pixel_value == 255 )
+        //         {
+        //             mask.at<uchar>(i, j) = 0;
+        //         }
+        //     }
+        // }
         // Pass the image to the SLAM system
         SLAM.TrackRGBD(imRGB,imD,mask,tframe);
 
