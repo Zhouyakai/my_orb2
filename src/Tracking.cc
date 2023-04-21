@@ -237,30 +237,6 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, cv::Mat
         mGeometry.GeometricModelCorrection(mCurrentFrame,imDepth,imMask);
     }
 
-    for (int i = 0; i < imMask.rows; i++) {
-        for (int j = 0; j < imMask.cols; j++) {
-            // 访问像素值
-            int pixel_value = imMask.at<uchar>(i, j);
-            // 在此处进行处理操作
-            if (pixel_value == 0 )
-            {
-                imMask.at<uchar>(i, j) = 255;
-            }
-        }
-    }
-    cv::imshow("maks combine", imMask);
-    for (int i = 0; i < imMask.rows; i++) {
-        for (int j = 0; j < imMask.cols; j++) {
-            // 访问像素值
-            int pixel_value = imMask.at<uchar>(i, j);
-            // 在此处进行处理操作
-            if (pixel_value == 255 )
-            {
-                imMask.at<uchar>(i, j) = 0;
-            }
-        }
-    }
-
     mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
     Track();

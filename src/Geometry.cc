@@ -37,29 +37,6 @@ void Geometry::GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame,
         vector<ORB_SLAM2::Frame> vRefFrames = GetRefFrames(currentFrame);
         vector<DynKeyPoint> vDynPoints = ExtractDynPoints(vRefFrames,currentFrame);
         mask = DepthRegionGrowing(vDynPoints,imDepth);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 0 )
-                {
-                    mask.at<uchar>(i, j) = 255;
-                }
-            }
-        }
-        cv::imshow("mask geometry",mask);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 255 )
-                {
-                    mask.at<uchar>(i, j) = 0;
-                }
-            }
-        }     
         CombineMasks(currentFrame,mask);
     }
 }
