@@ -41,7 +41,7 @@ void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageF
 
 void LoadBoundingBoxFromPython(const string& resultFromPython, std::pair<vector<double>, int>& detect_result);
 void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result, int sockfd);
-cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd);
+cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd, const cv::Mat &depthmap);
 
 
 int main(int argc, char **argv)
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
         cout << "********new********** " << ni+1 << endl;
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
         //mask.setTo(1);
-        mask = GetDynamicBox(detect_result,sockfd);
+        mask = GetDynamicBox(detect_result,sockfd,imD);
         for (int i = 0; i < mask.rows; i++) {
             for (int j = 0; j < mask.cols; j++) {
                 // 访问像素值
@@ -337,18 +337,94 @@ void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result , i
     // for (int k=0; k<detect_result.size(); ++k)
         // cout << "detect_result is : \n " << detect_result[k].second << endl;
 }
-cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd){
+bool sort_by_z(const cv::Point3f &p1, const cv::Point3f &p2)
+{
+    return p1.z < p2.z;
+}
+cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd, const cv::Mat &depthmap){
     MakeDetect_result(detect_result,sockfd);
     cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
+    cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
     mask.setTo(1);
+    _mask.setTo(1);
     for(int k=0; k<detect_result.size(); ++k){
         if (detect_result[k].second == 3 ){
             cv::Point pt11,pt22;
             pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
             pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
-            cv::rectangle(mask,pt11,pt22,0,-1);
+            cv::rectangle(_mask,pt11,pt22,0,-1);
         }
     }
+
+    cv::Mat Depth = depthmap;
+    Depth.convertTo(Depth,CV_32F,2e-4);
+    for(int k=0; k<detect_result.size(); ++k){
+        if (detect_result[k].second == 3 ){
+            cv::Point pt11,pt22;
+            pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
+            pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
+
+            std::vector<cv::Point3f> _vPoints;
+            std::vector<cv::Point3f> vPoints;
+            for (int i = pt11.y + 5; i < pt22.y; i+=10) {
+                for (int j = pt11.x + 5; j < pt22.x; j+=10) {
+                    cv::Point3f point;
+                    point.x = j;
+                    point.y = i;
+                    const float d = Depth.at<float>(point.y,point.x);
+                    point.z = d;
+                    if(d > 0)
+                    {
+                        //std::cout << point << std::endl;
+                        _vPoints.push_back(point);
+                    }
+                }
+            }
+            std::sort(_vPoints.begin(), _vPoints.end(), sort_by_z);
+            vPoints = _vPoints;
+            std::cout << vPoints << std::endl;
+            vPoints.resize(10);
+            //std::cout << "I'm here!!!" << std::endl;
+
+            //abort();
+
+            cv::Mat maskG = cv::Mat::zeros(480,640,CV_32F);
+
+            if (!vPoints.empty())
+            {
+                float SegThreshold = 0.20;
+
+                for (size_t i(0); i < vPoints.size(); i++){
+                    int xSeed = vPoints[i].x;
+                    int ySeed = vPoints[i].y;
+                    const float d = Depth.at<float>(ySeed,xSeed);
+                    //std::cout << d << std::endl;
+                    if (maskG.at<float>(ySeed,xSeed)!=1. && d > 0)
+                    {
+                        DynaSLAM::Geometry geometry;
+                        cv::Mat J = geometry.RegionGrowing(Depth,xSeed,ySeed,SegThreshold);
+                        maskG = maskG | J;
+                    }
+                }
+
+                int dilation_size = 15;
+                cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE,
+                                                    cv::Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+                                                    cv::Point( dilation_size, dilation_size ) );
+                maskG.cv::Mat::convertTo(maskG,CV_8U);
+                cv::dilate(maskG, maskG, kernel);
+            }
+            else
+            {
+                maskG.cv::Mat::convertTo(maskG,CV_8U);
+            }
+
+            cv::Mat _maskG = cv::Mat::ones(480,640,CV_8U);
+            maskG = _maskG - maskG;
+            mask = mask & maskG;
+        }
+    }
+    mask = mask | _mask;
     return mask;
 }
 

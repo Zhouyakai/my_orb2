@@ -54,7 +54,6 @@ private:
 
     bool isRotationMatrix(const cv::Mat &R);
     cv::Mat rotm2euler(const cv::Mat &R);
-    cv::Mat RegionGrowing(const cv::Mat &Image,int &x,int &y,const float &threshold);
 
     cv::Mat RegionGrowingGaps(const cv::Mat &Image, int &x, int &y);
 
@@ -86,6 +85,7 @@ public:
     void GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame, cv::Mat &imDepth, cv::Mat &mask);
     void InpaintFrames(const ORB_SLAM2::Frame &currentFrame, cv::Mat &imGray, cv::Mat &imDepth, cv::Mat &imRGB, cv::Mat &mask);
     void GeometricModelUpdateDB(const ORB_SLAM2::Frame &mCurrentFrame);
+    cv::Mat RegionGrowing(const cv::Mat &Image,int &x,int &y,const float &threshold);
 };
 
 
