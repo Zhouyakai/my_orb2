@@ -344,17 +344,7 @@ bool sort_by_z(const cv::Point3f &p1, const cv::Point3f &p2)
 cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd, const cv::Mat &depthmap){
     MakeDetect_result(detect_result,sockfd);
     cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
-    cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
     mask.setTo(1);
-    _mask.setTo(1);
-    for(int k=0; k<detect_result.size(); ++k){
-        if (detect_result[k].second == 3 ){
-            cv::Point pt11,pt22;
-            pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
-            pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
-            cv::rectangle(_mask,pt11,pt22,0,-1);
-        }
-    }
 
     cv::Mat Depth = depthmap;
     Depth.convertTo(Depth,CV_32F,2e-4);
@@ -363,11 +353,13 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
             cv::Point pt11,pt22;
             pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
             pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
+            cv::Rect roi(pt11.x, pt11.y, pt22.x-pt11.x, pt22.y-pt11.y);
+            cv::Mat roiImg = Depth(roi);
 
             std::vector<cv::Point3f> _vPoints;
             std::vector<cv::Point3f> vPoints;
-            for (int i = pt11.y + 5; i < pt22.y; i+=10) {
-                for (int j = pt11.x + 5; j < pt22.x; j+=10) {
+            for (int i = pt11.y + 5; i < pt22.y; i+=40) {
+                for (int j = pt11.x + 5; j < pt22.x; j+=40) {
                     cv::Point3f point;
                     point.x = j;
                     point.y = i;
@@ -382,13 +374,12 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
             }
             std::sort(_vPoints.begin(), _vPoints.end(), sort_by_z);
             vPoints = _vPoints;
-            std::cout << vPoints << std::endl;
             vPoints.resize(10);
+            std::cout << vPoints << std::endl;
             //std::cout << "I'm here!!!" << std::endl;
 
-            //abort();
+            cv::Mat maskG = cv::Mat::zeros(roiImg.rows,roiImg.cols,CV_32F);
 
-            cv::Mat maskG = cv::Mat::zeros(480,640,CV_32F);
 
             if (!vPoints.empty())
             {
@@ -399,10 +390,12 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
                     int ySeed = vPoints[i].y;
                     const float d = Depth.at<float>(ySeed,xSeed);
                     //std::cout << d << std::endl;
-                    if (maskG.at<float>(ySeed,xSeed)!=1. && d > 0)
+                    if (maskG.at<float>(ySeed-pt11.y,xSeed-pt11.x)!=1. && d > 0)
                     {
                         DynaSLAM::Geometry geometry;
-                        cv::Mat J = geometry.RegionGrowing(Depth,xSeed,ySeed,SegThreshold);
+                        int x = xSeed-pt11.x;
+                        int y = ySeed-pt11.y;
+                        cv::Mat J = geometry.RegionGrowing(roiImg,x,y,SegThreshold);
                         maskG = maskG | J;
                     }
                 }
@@ -419,12 +412,13 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
                 maskG.cv::Mat::convertTo(maskG,CV_8U);
             }
 
-            cv::Mat _maskG = cv::Mat::ones(480,640,CV_8U);
+            cv::Mat _maskG = cv::Mat::ones(roiImg.rows,roiImg.cols,CV_8U);
             maskG = _maskG - maskG;
-            mask = mask & maskG;
+            cv::Rect roi1(pt11.x, pt11.y, maskG.cols, maskG.rows);
+            cv::Mat roiDest = mask(roi1);
+            maskG.copyTo(roiDest);
         }
     }
-    mask = mask | _mask;
     return mask;
 }
 
