@@ -30,6 +30,7 @@
 #include<chrono>
 
 #include<opencv2/core/core.hpp>
+#include <Eigen/Core>
 
 #include "Geometry.h"
 #include <System.h>
@@ -42,6 +43,32 @@ void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageF
 void LoadBoundingBoxFromPython(const string& resultFromPython, std::pair<vector<double>, int>& detect_result);
 void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result, int sockfd);
 cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd, const cv::Mat &depthmap);
+void ShowMask(string mask_name,cv::Mat &mask)
+{
+    for (int i = 0; i < mask.rows; i++) {
+        for (int j = 0; j < mask.cols; j++) {
+            // 访问像素值
+            int pixel_value = mask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 0 )
+            {
+                mask.at<uchar>(i, j) = 255;
+            }
+        }
+    }
+    cv::imshow(mask_name, mask);
+    for (int i = 0; i < mask.rows; i++) {
+        for (int j = 0; j < mask.cols; j++) {
+            // 访问像素值
+            int pixel_value = mask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 255 )
+            {
+                mask.at<uchar>(i, j) = 0;
+            }
+        }
+    }
+}
 
 
 int main(int argc, char **argv)
@@ -112,13 +139,14 @@ int main(int argc, char **argv)
     cout << "Images in the sequence: " << nImages << endl << endl;
 
     // Main loop
-    cv::Mat imRGB, imD;
+    cv::Mat imRGB, imD, depthmap;
     vector<std::pair<vector<double>, int>> detect_result;
     for(int ni=0; ni<nImages; ni++)
     {
         // Read image and depthmap from file
         imRGB = cv::imread(string(argv[3])+"/"+vstrImageFilenamesRGB[ni],CV_LOAD_IMAGE_UNCHANGED);
         imD = cv::imread(string(argv[3])+"/"+vstrImageFilenamesD[ni],CV_LOAD_IMAGE_UNCHANGED);
+        depthmap = cv::imread(string(argv[3])+"/"+vstrImageFilenamesD[ni],cv::IMREAD_GRAYSCALE);
         double tframe = vTimestamps[ni];
 
         if(imRGB.empty())
@@ -137,30 +165,10 @@ int main(int argc, char **argv)
         cout << "********new********** " << ni+1 << endl;
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
         //mask.setTo(1);
-        mask = GetDynamicBox(detect_result,sockfd,imD);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 0 )
-                {
-                    mask.at<uchar>(i, j) = 255;
-                }
-            }
-        }
-        cv::imshow("maks RCNN", mask);
-        for (int i = 0; i < mask.rows; i++) {
-            for (int j = 0; j < mask.cols; j++) {
-                // 访问像素值
-                int pixel_value = mask.at<uchar>(i, j);
-                // 在此处进行处理操作
-                if (pixel_value == 255 )
-                {
-                    mask.at<uchar>(i, j) = 0;
-                }
-            }
-        }
+        mask = GetDynamicBox(detect_result,sockfd,depthmap);
+        ShowMask("mask", mask);
+        //cv::imshow("depthmap", depthmap);
+        //cv::waitKey(0);
         // Pass the image to the SLAM system
         SLAM.TrackRGBD(imRGB,imD,mask,tframe);
 
@@ -337,17 +345,12 @@ void MakeDetect_result(vector<std::pair<vector<double>, int>>& detect_result , i
     // for (int k=0; k<detect_result.size(); ++k)
         // cout << "detect_result is : \n " << detect_result[k].second << endl;
 }
-bool sort_by_z(const cv::Point3f &p1, const cv::Point3f &p2)
-{
-    return p1.z < p2.z;
-}
 cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , int sockfd, const cv::Mat &depthmap){
     MakeDetect_result(detect_result,sockfd);
     cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
     mask.setTo(1);
 
-    cv::Mat Depth = depthmap;
-    Depth.convertTo(Depth,CV_32F,2e-4);
+    cv::Mat Depth = depthmap.clone();
     for(int k=0; k<detect_result.size(); ++k){
         if (detect_result[k].second == 3 ){
             cv::Point pt11,pt22;
@@ -355,70 +358,78 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
             pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
             cv::Rect roi(pt11.x, pt11.y, pt22.x-pt11.x, pt22.y-pt11.y);
             cv::Mat roiImg = Depth(roi);
-
-            std::vector<cv::Point3f> _vPoints;
-            std::vector<cv::Point3f> vPoints;
-            for (int i = pt11.y + 5; i < pt22.y; i+=40) {
-                for (int j = pt11.x + 5; j < pt22.x; j+=40) {
-                    cv::Point3f point;
-                    point.x = j;
-                    point.y = i;
-                    const float d = Depth.at<float>(point.y,point.x);
-                    point.z = d;
-                    if(d > 0)
-                    {
-                        //std::cout << point << std::endl;
-                        _vPoints.push_back(point);
-                    }
-                }
-            }
-            std::sort(_vPoints.begin(), _vPoints.end(), sort_by_z);
-            vPoints = _vPoints;
-            vPoints.resize(10);
-            std::cout << vPoints << std::endl;
-            //std::cout << "I'm here!!!" << std::endl;
-
-            cv::Mat maskG = cv::Mat::zeros(roiImg.rows,roiImg.cols,CV_32F);
-
-
-            if (!vPoints.empty())
+            int roiImg_size = roiImg.rows*roiImg.cols;
+            cout << "roiImg的像素值="<< roiImg_size << endl;
+            if(roiImg_size < mask.rows*mask.cols/50)
             {
-                float SegThreshold = 0.20;
-
-                for (size_t i(0); i < vPoints.size(); i++){
-                    int xSeed = vPoints[i].x;
-                    int ySeed = vPoints[i].y;
-                    const float d = Depth.at<float>(ySeed,xSeed);
-                    //std::cout << d << std::endl;
-                    if (maskG.at<float>(ySeed-pt11.y,xSeed-pt11.x)!=1. && d > 0)
-                    {
-                        DynaSLAM::Geometry geometry;
-                        int x = xSeed-pt11.x;
-                        int y = ySeed-pt11.y;
-                        cv::Mat J = geometry.RegionGrowing(roiImg,x,y,SegThreshold);
-                        maskG = maskG | J;
-                    }
-                }
-
-                int dilation_size = 15;
-                cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE,
-                                                    cv::Size( 2*dilation_size + 1, 2*dilation_size+1 ),
-                                                    cv::Point( dilation_size, dilation_size ) );
-                maskG.cv::Mat::convertTo(maskG,CV_8U);
-                cv::dilate(maskG, maskG, kernel);
+                roiImg.setTo(0);
+                cv::Mat roiDest = mask(roi);
+                roiImg.copyTo(roiDest);
             }
             else
             {
-                maskG.cv::Mat::convertTo(maskG,CV_8U);
-            }
+                //cv::imshow("roiImg1", roiImg);
+                for (int i = 0; i < roiImg.rows; i++) {                                                    
+                    for (int j = 0; j < roiImg.cols; j++) {
+                        int pixel_value = roiImg.at<uchar>(i, j);
+                        if (pixel_value < 10)
+                        {
+                            roiImg.at<uchar>(i, j) = 255;
+                        }
+                    }
+                }
+                //cv::imshow("roiImg2", roiImg);
 
-            cv::Mat _maskG = cv::Mat::ones(roiImg.rows,roiImg.cols,CV_8U);
-            maskG = _maskG - maskG;
-            cv::Rect roi1(pt11.x, pt11.y, maskG.cols, maskG.rows);
-            cv::Mat roiDest = mask(roi1);
-            maskG.copyTo(roiDest);
+
+                int histSize = 256;
+                float range[] = { 0, 256 };
+                const float* histRange[] = { range };
+                cv::Mat hist;
+                cv::calcHist(&roiImg, 1, 0, cv::Mat(), hist, 1, &histSize, histRange);
+
+                bool find_Threshold = false;
+                int threshold = -1;
+                for (int i = 1; i < hist.rows; i++)
+                {
+                    if(find_Threshold == false && hist.at<float>(i) > 1000)
+                    {
+                        find_Threshold = true;
+                        threshold = i + 10;
+                    }
+                }
+                cout << "threshold前后15个的灰度值 "<< endl;
+                for (int i = threshold -15; i < threshold + 15; i++)
+                {
+                    if(i == threshold)
+                        cout << "灰度值 " << i << " 的个数：" << hist.at<float>(i) << "    这个是阈值"<< endl;
+                    else
+                        cout << "灰度值 " << i << " 的个数：" << hist.at<float>(i) << endl;
+                }
+                cv::threshold(roiImg, roiImg, threshold, 1, cv::THRESH_BINARY_INV);
+                cv::Mat depth_roi = roiImg.clone();
+                //ShowMask("roiImg3", depth_roi);
+
+                int dilation_size = 7;
+                cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE,
+                                                    cv::Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+                                                    cv::Point( dilation_size, dilation_size ) );
+                depth_roi.cv::Mat::convertTo(depth_roi,CV_8U);
+                cv::dilate(depth_roi, depth_roi, kernel);
+                //ShowMask("roiImg4", depth_roi);
+                //cv::imwrite("/home/yakai/SLAM/my_orb2/person.jpg", depth_roi);
+                //cv::waitKey(0);
+
+                cv::Mat _depth_roi = cv::Mat::ones(depth_roi.rows,depth_roi.cols,CV_8U);
+                depth_roi = _depth_roi - depth_roi;
+                cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
+                _mask.setTo(1);
+                cv::Mat roiDest = _mask(roi);
+                depth_roi.copyTo(roiDest); 
+                mask = mask & _mask;
+            }
         }
     }
     return mask;
 }
+
 
