@@ -166,7 +166,7 @@ int main(int argc, char **argv)
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
         //mask.setTo(1);
         mask = GetDynamicBox(detect_result,sockfd,depthmap);
-        ShowMask("mask", mask);
+        //ShowMask("mask", mask);
         //cv::imshow("depthmap", depthmap);
         //cv::waitKey(0);
         // Pass the image to the SLAM system
@@ -362,9 +362,12 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
             cout << "roiImg的像素值="<< roiImg_size << endl;
             if(roiImg_size < mask.rows*mask.cols/50)
             {
+                cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
+                _mask.setTo(1);
                 roiImg.setTo(0);
-                cv::Mat roiDest = mask(roi);
-                roiImg.copyTo(roiDest);
+                cv::Mat roiDest = _mask(roi);
+                roiImg.copyTo(roiDest); 
+                mask = mask & _mask;
             }
             else
             {
