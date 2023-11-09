@@ -166,11 +166,11 @@ int main(int argc, char **argv)
         cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
         //mask.setTo(1);
         mask = GetDynamicBox(detect_result,sockfd,depthmap);
-        //ShowMask("mask", mask);
+        ShowMask("mask yolov5", mask);
         //cv::imshow("depthmap", depthmap);
         //cv::waitKey(0);
         // Pass the image to the SLAM system
-        SLAM.TrackRGBD(imRGB,imD,mask,tframe);
+        SLAM.TrackRGBD(imRGB,imD,depthmap,mask,tframe,detect_result);
 
 #ifdef COMPILEDWITHC11
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
@@ -359,8 +359,8 @@ cv::Mat GetDynamicBox(vector<std::pair<vector<double>, int>>& detect_result , in
             cv::Rect roi(pt11.x, pt11.y, pt22.x-pt11.x, pt22.y-pt11.y);
             cv::Mat roiImg = Depth(roi);
             int roiImg_size = roiImg.rows*roiImg.cols;
-            cout << "roiImg的像素值="<< roiImg_size << endl;
-            if(roiImg_size < mask.rows*mask.cols/50)
+            cout << "roiImg区域大小="<< roiImg_size << endl;
+            if(roiImg_size < mask.rows*mask.cols/50)//检测框比较小，则将检测框全部设为mask
             {
                 cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
                 _mask.setTo(1);

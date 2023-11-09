@@ -204,10 +204,11 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
 }
 
 
-cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, cv::Mat &mask, const double &timestamp)
+cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const cv::Mat &depthmap, cv::Mat &mask, const double &timestamp, vector<std::pair<vector<double>, int>>& detect_result)
 {
     mImGray = imRGB;
     cv::Mat imDepth = imD;
+    cv::Mat Depth = depthmap.clone();
     cv::Mat imMask = mask;
 
     if(mImGray.channels()==3)
@@ -228,44 +229,44 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, cv::Mat
     if((fabs(mDepthMapFactor-1.0f)>1e-5) || imDepth.type()!=CV_32F)
         imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
 
-    // mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
+    mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
-    // LightTrack();
+    LightTrack();
 
-    // if (!mCurrentFrame.mTcw.empty())
-    // {
-    //     mGeometry.GeometricModelCorrection(mCurrentFrame,imDepth,imMask);
-    // }
+    if (!mCurrentFrame.mTcw.empty())
+    {
+        mGeometry.GeometricModelCorrection(mCurrentFrame,Depth,imMask,detect_result);
+    }
 
-    // for (int i = 0; i < imMask.rows; i++) {
-    //     for (int j = 0; j < imMask.cols; j++) {
-    //         // 访问像素值
-    //         int pixel_value = imMask.at<uchar>(i, j);
-    //         // 在此处进行处理操作
-    //         if (pixel_value == 0 )
-    //         {
-    //             imMask.at<uchar>(i, j) = 255;
-    //         }
-    //     }
-    // }
-    // cv::imshow("maks combine", imMask);
-    // for (int i = 0; i < imMask.rows; i++) {
-    //     for (int j = 0; j < imMask.cols; j++) {
-    //         // 访问像素值
-    //         int pixel_value = imMask.at<uchar>(i, j);
-    //         // 在此处进行处理操作
-    //         if (pixel_value == 255 )
-    //         {
-    //             imMask.at<uchar>(i, j) = 0;
-    //         }
-    //     }
-    // }
+    for (int i = 0; i < imMask.rows; i++) {
+        for (int j = 0; j < imMask.cols; j++) {
+            // 访问像素值
+            int pixel_value = imMask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 0 )
+            {
+                imMask.at<uchar>(i, j) = 255;
+            }
+        }
+    }
+    cv::imshow("yolov5+geometry", imMask);
+    for (int i = 0; i < imMask.rows; i++) {
+        for (int j = 0; j < imMask.cols; j++) {
+            // 访问像素值
+            int pixel_value = imMask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 255 )
+            {
+                imMask.at<uchar>(i, j) = 0;
+            }
+        }
+    }
 
     mCurrentFrame = Frame(mImGray,imDepth,imMask,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
     Track();
 
-    //mGeometry.GeometricModelUpdateDB(mCurrentFrame);
+    mGeometry.GeometricModelUpdateDB(mCurrentFrame);
 
     return mCurrentFrame.mTcw.clone();
 }

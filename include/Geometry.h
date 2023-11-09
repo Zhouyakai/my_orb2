@@ -82,9 +82,12 @@ private:
 public:
     Geometry();
     ~Geometry() = default;
-    void GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame, cv::Mat &imDepth, cv::Mat &mask);
+    void GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame, cv::Mat &imDepth, cv::Mat &mask, vector<std::pair<vector<double>, int>>& detect_result);
     void InpaintFrames(const ORB_SLAM2::Frame &currentFrame, cv::Mat &imGray, cv::Mat &imDepth, cv::Mat &imRGB, cv::Mat &mask);
     void GeometricModelUpdateDB(const ORB_SLAM2::Frame &mCurrentFrame);
+    void ShowMask(string mask_name,cv::Mat &mask);//by zyk
+    bool isPointInRectangle(int x, int y, int rectX, int rectY, int rectWidth, int rectHeight);//by zyk
+    cv::Mat GetGemotryMask(const vector<DynKeyPoint> &vDynPoints,const cv::Mat &imDepth, vector<std::pair<vector<double>, int>>& detect_result);//by zyk
     cv::Mat RegionGrowing(const cv::Mat &Image,int &x,int &y,const float &threshold);
 };
 

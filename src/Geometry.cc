@@ -27,8 +27,16 @@ Geometry::Geometry()
 }
 
 void Geometry::GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame,
-                                        cv::Mat &imDepth, cv::Mat &mask){
+                                        cv::Mat &imDepth, cv::Mat &mask, vector<std::pair<vector<double>, int>>& detect_result){
     std::cout << "mDB.mNumElem = " << mDB.mNumElem << std::endl;
+    std::cout << "detect_result.size() = " << detect_result.size() << std::endl;
+    for(int k=0; k<detect_result.size(); ++k){
+        if (detect_result[k].second == 3 )
+            std::cout << "this is person." << std::endl;
+        else
+            std::cout << "this is not person." << std::endl;
+    }
+
     if(currentFrame.mTcw.empty()){
         std::cout << "Geometry not working." << std::endl;
     }
@@ -36,7 +44,7 @@ void Geometry::GeometricModelCorrection(const ORB_SLAM2::Frame &currentFrame,
         std::cout << "Im here" << std::endl;
         vector<ORB_SLAM2::Frame> vRefFrames = GetRefFrames(currentFrame);
         vector<DynKeyPoint> vDynPoints = ExtractDynPoints(vRefFrames,currentFrame);
-        mask = DepthRegionGrowing(vDynPoints,imDepth);
+        mask = GetGemotryMask(vDynPoints,imDepth,detect_result);
         for (int i = 0; i < mask.rows; i++) {
             for (int j = 0; j < mask.cols; j++) {
                 // 访问像素值
@@ -414,6 +422,145 @@ vector<Geometry::DynKeyPoint> Geometry::ExtractDynPoints(const vector<ORB_SLAM2:
     }
 }
 
+void Geometry::ShowMask(string mask_name,cv::Mat &mask)
+{
+    for (int i = 0; i < mask.rows; i++) {
+        for (int j = 0; j < mask.cols; j++) {
+            // 访问像素值
+            int pixel_value = mask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 0 )
+            {
+                mask.at<uchar>(i, j) = 255;
+            }
+        }
+    }
+    cv::imshow(mask_name, mask);
+    for (int i = 0; i < mask.rows; i++) {
+        for (int j = 0; j < mask.cols; j++) {
+            // 访问像素值
+            int pixel_value = mask.at<uchar>(i, j);
+            // 在此处进行处理操作
+            if (pixel_value == 255 )
+            {
+                mask.at<uchar>(i, j) = 0;
+            }
+        }
+    }
+}
+
+bool Geometry::isPointInRectangle(int x, int y, int rectX, int rectY, int rectWidth, int rectHeight) {
+    return (x >= rectX && x <= rectX + rectWidth && y >= rectY && y <= rectY + rectHeight);
+}
+
+cv::Mat Geometry::GetGemotryMask(const vector<DynKeyPoint> &vDynPoints,const cv::Mat &imDepth, vector<std::pair<vector<double>, int>>& detect_result){
+
+    cv::Mat Depth = imDepth.clone();
+    cv::Mat mask = cv::Mat::ones(480,640,CV_8U);
+    mask.setTo(1);
+    //获取每个检测框内的点个数
+    std::vector<int> pointsInRectangles(detect_result.size(), 0);
+    for (auto& dynPoint : vDynPoints) {
+        for (int i = 0; i < detect_result.size(); i++) {
+            //不计算动态框内的点数，3代表是动态框，直接跳过
+            // if(detect_result[i].second == 3)
+            //     continue;
+            
+            cv::Point pt11,pt22;
+            pt11 = cv::Point(detect_result[i].first[0],detect_result[i].first[1]);//检测框左上角坐标
+            pt22 = cv::Point(detect_result[i].first[2],detect_result[i].first[3]);//检测框右下角坐标
+            if (isPointInRectangle(dynPoint.mPoint.x, dynPoint.mPoint.y, pt11.x, pt11.y, pt22.x-pt11.x, pt22.y-pt11.y)) {
+                pointsInRectangles[i]++;
+            }
+        }
+    }
+    for(int k = 0; k < detect_result.size(); k++){
+        //检测框内的动态点超过一定数量，说明这块区域是真实运动区域,创建这块区域的mask
+        if(pointsInRectangles[k] >= 5){
+            cv::Point pt11,pt22;
+            pt11 = cv::Point(detect_result[k].first[0],detect_result[k].first[1]);
+            pt22 = cv::Point(detect_result[k].first[2],detect_result[k].first[3]);
+            cv::Rect roi(pt11.x, pt11.y, pt22.x-pt11.x, pt22.y-pt11.y);
+            cv::Mat roiImg = Depth(roi);
+            int roiImg_size = roiImg.rows*roiImg.cols;
+            cout << "roiImg区域大小="<< roiImg_size << endl;
+            if(roiImg_size < mask.rows*mask.cols/50)//检测框比较小，则将检测框全部设为mask
+            {
+                cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
+                _mask.setTo(1);
+                roiImg.setTo(0);
+                cv::Mat roiDest = _mask(roi);
+                roiImg.copyTo(roiDest); 
+                mask = mask & _mask;
+            }
+            else
+            {
+                //cv::imshow("roiImg1", roiImg);
+                for (int i = 0; i < roiImg.rows; i++) {                                                    
+                    for (int j = 0; j < roiImg.cols; j++) {
+                        int pixel_value = roiImg.at<uchar>(i, j);
+                        if (pixel_value < 10)
+                        {
+                            roiImg.at<uchar>(i, j) = 255;
+                        }
+                    }
+                }
+                //cv::imshow("roiImg2", roiImg);
+
+
+                int histSize = 256;
+                float range[] = { 0, 256 };
+                const float* histRange[] = { range };
+                cv::Mat hist;
+                cv::calcHist(&roiImg, 1, 0, cv::Mat(), hist, 1, &histSize, histRange);
+
+                bool find_Threshold = false;
+                int threshold = -1;
+                for (int i = 1; i < hist.rows; i++)
+                {
+                    if(find_Threshold == false && hist.at<float>(i) > 1000)
+                    {
+                        find_Threshold = true;
+                        threshold = i + 10;
+                    }
+                }
+                cout << "真实运动区域的threshold前后15个的灰度值 "<< endl;
+                for (int i = threshold -15; i < threshold + 15; i++)
+                {
+                    if(i == threshold)
+                        cout << "灰度值 " << i << " 的个数：" << hist.at<float>(i) << "    这个是阈值"<< endl;
+                    else
+                        cout << "灰度值 " << i << " 的个数：" << hist.at<float>(i) << endl;
+                }
+                cv::threshold(roiImg, roiImg, threshold, 1, cv::THRESH_BINARY_INV);
+                cv::Mat depth_roi = roiImg.clone();
+                //ShowMask("roiImg3", depth_roi);
+
+                int dilation_size = 7;
+                cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE,
+                                                    cv::Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+                                                    cv::Point( dilation_size, dilation_size ) );
+                depth_roi.cv::Mat::convertTo(depth_roi,CV_8U);
+                cv::dilate(depth_roi, depth_roi, kernel);
+                //ShowMask("roiImg4", depth_roi);
+                //cv::imwrite("/home/yakai/SLAM/my_orb2/person.jpg", depth_roi);
+                //cv::waitKey(0);
+
+                cv::Mat _depth_roi = cv::Mat::ones(depth_roi.rows,depth_roi.cols,CV_8U);
+                depth_roi = _depth_roi - depth_roi;
+                cv::Mat _mask = cv::Mat::ones(480,640,CV_8U);
+                _mask.setTo(1);
+                cv::Mat roiDest = _mask(roi);
+                depth_roi.copyTo(roiDest); 
+                mask = mask & _mask;
+                ShowMask("mask geometry", mask);
+                //cv::waitKey(0);
+            }
+        }
+    }
+    
+    return mask;
+}
 
 cv::Mat Geometry::DepthRegionGrowing(const vector<DynKeyPoint> &vDynPoints,const cv::Mat &imDepth){
 
